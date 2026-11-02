@@ -40,19 +40,16 @@ class LedgerHold extends Model
     /** Column defaults, so freshly created models carry them too. */
     protected $attributes = ['timeout_seconds' => 0];
 
-    protected function casts(): array
-    {
-        return [
-            'status' => HoldStatus::class,
-            'amount' => 'integer',
-            'posted_amount' => 'integer',
-            'ledger' => 'integer',
-            'tb_code' => 'integer',
-            'timeout_seconds' => 'integer',
-            'expires_at' => 'datetime',
-            'metadata' => 'array',
-        ];
-    }
+    protected $casts = [
+        'status' => HoldStatus::class,
+        'amount' => 'integer',
+        'posted_amount' => 'integer',
+        'ledger' => 'integer',
+        'tb_code' => 'integer',
+        'timeout_seconds' => 'integer',
+        'expires_at' => 'datetime',
+        'metadata' => 'array',
+    ];
 
     public function debitAccount(): BelongsTo
     {

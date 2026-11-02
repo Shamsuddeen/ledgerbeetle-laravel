@@ -44,19 +44,16 @@ class LedgerTransfer extends Model
     /** Column defaults, so freshly created models carry them too. */
     protected $attributes = ['reversed_amount' => 0];
 
-    protected function casts(): array
-    {
-        return [
-            'kind' => TransferKind::class,
-            'status' => TransferStatus::class,
-            'amount' => 'integer',
-            'ledger' => 'integer',
-            'tb_code' => 'integer',
-            'reversed_amount' => 'integer',
-            'tb_timestamp' => 'integer',
-            'metadata' => 'array',
-        ];
-    }
+    protected $casts = [
+        'kind' => TransferKind::class,
+        'status' => TransferStatus::class,
+        'amount' => 'integer',
+        'ledger' => 'integer',
+        'tb_code' => 'integer',
+        'reversed_amount' => 'integer',
+        'tb_timestamp' => 'integer',
+        'metadata' => 'array',
+    ];
 
     public function debitAccount(): BelongsTo
     {

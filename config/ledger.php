@@ -27,6 +27,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Database connection
+    |--------------------------------------------------------------------------
+    |
+    | The connection for the ledger_* tables. Null uses the app's default.
+    |
+    | If you call the ledger inside your own database transactions, point this
+    | at a second connection to the same database. Ledger rows then commit on
+    | their own, so a rollback of your transaction can't erase the record of a
+    | transfer TigerBeetle already accepted, and a retry with the same key
+    | resends the same TB id instead of posting again.
+    |
+    */
+
+    'database_connection' => env('LEDGER_DB_CONNECTION'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Ledgers
     |--------------------------------------------------------------------------
     |

@@ -39,7 +39,7 @@ final class ReversalService
         $originalId = $transfer instanceof LedgerTransfer ? $transfer->id : $transfer;
 
         // Lock the original so concurrent reversals see each other's reservations.
-        [$original, $row] = DB::transaction(function () use ($originalId, $amount, $key, $reason) {
+        [$original, $row] = DB::connection(config('ledger.database_connection'))->transaction(function () use ($originalId, $amount, $key, $reason) {
             $original = LedgerTransfer::query()->lockForUpdate()->findOrFail($originalId);
 
             if ($original->status !== TransferStatus::POSTED

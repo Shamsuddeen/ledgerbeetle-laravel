@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use LedgerBeetle\Laravel\Enums\TransferStatus;
+use LedgerBeetle\Laravel\Models\Concerns\UsesLedgerConnection;
 
 /**
  * @property int $id
@@ -31,6 +32,8 @@ use LedgerBeetle\Laravel\Enums\TransferStatus;
  */
 class LedgerConversion extends Model
 {
+    use UsesLedgerConnection;
+
     protected $table = 'ledger_conversions';
 
     protected $guarded = ['id'];

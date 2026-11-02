@@ -201,6 +201,31 @@ Always pass an `idempotencyKey` derived from your own request, such as an order 
 
 Every write first records a `pending` row with a fresh TigerBeetle id, then submits it. If the process dies between those steps, a retry resends the same id, and TigerBeetle answers `EXISTS` instead of posting twice.
 
+### Inside your own database transactions
+
+TigerBeetle isn't part of your database transaction. Once it accepts a transfer, rolling back your transaction doesn't undo it.
+
+By default the ledger's rows use your default connection, so they roll back with your transaction. A retry with the same key then gets a fresh TigerBeetle id and posts again. If you call the ledger inside your own transactions, give it a second connection to the same database:
+
+```php
+// config/database.php
+'connections' => [
+    'mysql' => [/* ... */],
+    'ledger' => [/* same database as mysql */],
+],
+```
+
+```dotenv
+LEDGER_DB_CONNECTION=ledger
+```
+
+Ledger rows then commit on their own:
+
+- **Retries post once.** A retry finds the earlier row and resends the same TigerBeetle id.
+- **Crashes are visible.** A row left behind by a crash is there for `ledger:reconcile` to find.
+
+Undoing the money movement itself, such as releasing a hold or reversing a transfer when your transaction fails, is up to your app.
+
 ### Commands
 
 | Command | What it does |

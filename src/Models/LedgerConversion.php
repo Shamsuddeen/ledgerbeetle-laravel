@@ -38,16 +38,13 @@ class LedgerConversion extends Model
     /** Column defaults, so freshly created models carry them too. */
     protected $attributes = ['fee_amount' => 0];
 
-    protected function casts(): array
-    {
-        return [
-            'status' => TransferStatus::class,
-            'source_amount' => 'integer',
-            'target_amount' => 'integer',
-            'fee_amount' => 'integer',
-            'metadata' => 'array',
-        ];
-    }
+    protected $casts = [
+        'status' => TransferStatus::class,
+        'source_amount' => 'integer',
+        'target_amount' => 'integer',
+        'fee_amount' => 'integer',
+        'metadata' => 'array',
+    ];
 
     public function sourceAccount(): BelongsTo
     {

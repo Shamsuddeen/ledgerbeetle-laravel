@@ -15,7 +15,7 @@ A double-entry ledger for Laravel with [TigerBeetle](https://tigerbeetle.com) as
 
 [![Tests](https://github.com/Shamsuddeen/ledgerbeetle-laravel/actions/workflows/tests.yml/badge.svg)](https://github.com/Shamsuddeen/ledgerbeetle-laravel/actions/workflows/tests.yml)
 
-Requires PHP 8.2+, `ext-ffi`, `ext-bcmath` (`ext-gmp` is faster if you have it), Laravel 11–13, and TigerBeetle 0.17.x.
+Requires PHP 8.2+, `ext-ffi`, `ext-bcmath` (`ext-gmp` is faster if you have it), Laravel 10–13, and TigerBeetle 0.17.x. Laravel 10 is end-of-life, so prefer 11 or newer for new apps.
 
 ## Install
 

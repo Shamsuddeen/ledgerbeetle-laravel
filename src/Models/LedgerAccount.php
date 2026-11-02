@@ -36,17 +36,14 @@ class LedgerAccount extends Model
     /** Column defaults, so freshly created models carry them too. */
     protected $attributes = ['flags' => 0, 'is_active' => true];
 
-    protected function casts(): array
-    {
-        return [
-            'type' => AccountType::class,
-            'ledger' => 'integer',
-            'tb_code' => 'integer',
-            'flags' => 'integer',
-            'metadata' => 'array',
-            'is_active' => 'boolean',
-        ];
-    }
+    protected $casts = [
+        'type' => AccountType::class,
+        'ledger' => 'integer',
+        'tb_code' => 'integer',
+        'flags' => 'integer',
+        'metadata' => 'array',
+        'is_active' => 'boolean',
+    ];
 
     public function parent(): BelongsTo
     {

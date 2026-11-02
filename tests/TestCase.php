@@ -30,5 +30,8 @@ abstract class TestCase extends Orchestra
     {
         $app['config']->set('database.default', 'testing');
         $app['config']->set('ledger.gateway', 'memory');
+        $app['config']->set('ledger.fx.rates', ['USD/EUR' => '0.92', 'USD/JPY' => '150.5']);
+        $app['config']->set('ledger.api.enabled', true);
+        $app['config']->set('ledger.api.middleware', ['api']); // no auth in tests
     }
 }

@@ -70,6 +70,65 @@ return [
         'expense' => false,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Currency conversion
+    |--------------------------------------------------------------------------
+    |
+    | Rates used by the default ExchangeRates binding, as decimal strings of
+    | "TO units per FROM unit". The inverse pair is derived if missing. Bind
+    | LedgerBeetle\Laravel\Contracts\ExchangeRates to use a live provider.
+    |
+    | prevent_short stops FX.POSITION.* accounts going negative, so a
+    | conversion fails when the platform holds too little of the target
+    | currency. Applies when the position account is first created.
+    |
+    */
+
+    'fx' => [
+        'rates' => [
+            // 'USD/EUR' => '0.92',
+        ],
+        'prevent_short' => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Balance history
+    |--------------------------------------------------------------------------
+    |
+    | New accounts get TigerBeetle's history flag, which records the balance
+    | after every transfer and enables Ledger::balanceAt() and
+    | balanceHistory(). It cannot be added to an existing account.
+    |
+    */
+
+    'balance_history' => true,
+
+    /*
+    |--------------------------------------------------------------------------
+    | HTTP API
+    |--------------------------------------------------------------------------
+    |
+    | Off by default. When enabled, routes are registered under "prefix" with
+    | "middleware". Keep "api" (it provides route model binding) and put real
+    | authentication and authorization in front of it: these endpoints move
+    | money between any accounts they are given.
+    |
+    */
+
+    'api' => [
+        'enabled' => (bool) env('LEDGER_API', false),
+        'prefix' => env('LEDGER_API_PREFIX', 'ledger'),
+        'middleware' => ['api', 'auth'],
+    ],
+
+    // Where PostTransferBatch jobs run. Null means the app's default.
+    'queue' => [
+        'connection' => env('LEDGER_QUEUE_CONNECTION'),
+        'name' => env('LEDGER_QUEUE', 'default'),
+    ],
+
     // TB `code` stamped on transfers when the caller does not pass one.
     'default_transfer_code' => 1,
 ];

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace LedgerBeetle\Laravel\Contracts;
 
+use LedgerBeetle\Laravel\Gateways\Data\AccountBalanceState;
 use LedgerBeetle\Laravel\Gateways\Data\AccountSpec;
 use LedgerBeetle\Laravel\Gateways\Data\AccountState;
 use LedgerBeetle\Laravel\Gateways\Data\CreateOutcome;
@@ -46,4 +47,19 @@ interface TigerBeetleGateway
      * @return list<TransferState>
      */
     public function getAccountTransfers(string $accountId, int $limit = 100, bool $newestFirst = false): array;
+
+    /**
+     * Historical balances of an account created with the history flag: one
+     * entry per transfer, filtered to [$timestampMin, $timestampMax] TB
+     * timestamps (0 = unbounded).
+     *
+     * @return list<AccountBalanceState>
+     */
+    public function getAccountBalances(
+        string $accountId,
+        int $limit = 100,
+        bool $newestFirst = false,
+        int $timestampMin = 0,
+        int $timestampMax = 0,
+    ): array;
 }

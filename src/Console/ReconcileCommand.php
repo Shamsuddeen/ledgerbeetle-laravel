@@ -12,6 +12,7 @@ use LedgerBeetle\Laravel\Enums\HoldStatus;
 use LedgerBeetle\Laravel\Enums\TransferKind;
 use LedgerBeetle\Laravel\Enums\TransferStatus;
 use LedgerBeetle\Laravel\Models\LedgerAccount;
+use LedgerBeetle\Laravel\Models\LedgerConversion;
 use LedgerBeetle\Laravel\Models\LedgerHold;
 use LedgerBeetle\Laravel\Models\LedgerTransfer;
 use LedgerBeetle\Laravel\Services\AccountService;
@@ -23,6 +24,7 @@ use LedgerBeetle\Laravel\Services\AccountService;
  * - Transfers and holds stuck in "pending" (crashed between steps): if TB has
  *   them they are marked done; if not, --fix marks them failed so a retry
  *   with the same key reports the failure instead of hanging.
+ * - Conversions stuck in "pending" follow their legs.
  * - --deep also checks every posted transfer exists in TB with the same amount.
  */
 class ReconcileCommand extends Command
@@ -91,6 +93,29 @@ class ReconcileCommand extends Command
                     $transfer->update(['status' => TransferStatus::FAILED, 'failure_reason' => 'NOT_IN_TIGERBEETLE']);
                     if ($transfer->reverses_id !== null) {
                         LedgerTransfer::query()->whereKey($transfer->reverses_id)->decrement('reversed_amount', $transfer->amount);
+                    }
+                }
+            });
+
+        // A conversion settles with its legs, which were reconciled above.
+        LedgerConversion::query()->where('status', TransferStatus::PENDING)->where('created_at', '<=', $cutoff)
+            ->with('legs')->chunkById(self::CHUNK, function ($conversions) use ($fix) {
+                foreach ($conversions as $conversion) {
+                    $statuses = $conversion->legs->pluck('status')->unique();
+
+                    if ($statuses->count() === 1 && $statuses->first() === TransferStatus::POSTED) {
+                        $conversion->update(['status' => TransferStatus::POSTED]);
+                        $this->line("  Conversion {$conversion->id} confirmed in TigerBeetle.");
+                    } elseif ($conversion->legs->isEmpty() || $statuses->contains(TransferStatus::FAILED)) {
+                        $this->problem("Conversion {$conversion->id} did not post", $fix);
+                        if ($fix) {
+                            $failed = $conversion->legs->firstWhere('status', TransferStatus::FAILED);
+                            $conversion->update([
+                                'status' => TransferStatus::FAILED,
+                                'failure_reason' => $failed->failure_reason ?? 'NOT_IN_TIGERBEETLE',
+                                'reverses_id' => null,
+                            ]);
+                        }
                     }
                 }
             });

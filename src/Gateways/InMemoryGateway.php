@@ -8,6 +8,7 @@ use Illuminate\Support\Carbon;
 use LedgerBeetle\Laravel\Contracts\TigerBeetleGateway;
 use LedgerBeetle\Laravel\Enums\CreateAccountResult as AR;
 use LedgerBeetle\Laravel\Enums\CreateTransferResult as TR;
+use LedgerBeetle\Laravel\Gateways\Data\AccountBalanceState;
 use LedgerBeetle\Laravel\Gateways\Data\AccountSpec;
 use LedgerBeetle\Laravel\Gateways\Data\AccountState;
 use LedgerBeetle\Laravel\Gateways\Data\CreateOutcome;
@@ -38,6 +39,9 @@ final class InMemoryGateway implements TigerBeetleGateway
 
     /** @var array<string, true> */
     private array $failedIds = [];
+
+    /** @var array<string, list<AccountBalanceState>> per account with the history flag */
+    private array $history = [];
 
     private int $lastTimestamp = 0;
 
@@ -106,6 +110,21 @@ final class InMemoryGateway implements TigerBeetleGateway
         return array_slice($matches, 0, $limit);
     }
 
+    public function getAccountBalances(
+        string $accountId,
+        int $limit = 100,
+        bool $newestFirst = false,
+        int $timestampMin = 0,
+        int $timestampMax = 0,
+    ): array {
+        $matches = array_values(array_filter(
+            $this->history[$accountId] ?? [],
+            fn (AccountBalanceState $b) => $b->timestamp >= $timestampMin && ($timestampMax === 0 || $b->timestamp <= $timestampMax),
+        ));
+
+        return array_slice($newestFirst ? array_reverse($matches) : $matches, 0, $limit);
+    }
+
     /**
      * Apply events chain by chain. A failed event in a linked chain rolls back
      * the whole chain, and its siblings report LINKED_EVENT_FAILED.
@@ -140,7 +159,7 @@ final class InMemoryGateway implements TigerBeetleGateway
 
             // Tombstones are not rolled back: a transient failure burns its id
             // even inside a chain.
-            $snapshot = [$this->accounts, $this->transfers, $this->pendingState];
+            $snapshot = [$this->accounts, $this->transfers, $this->pendingState, $this->history];
             $chain = [];
             $failedAt = null;
 
@@ -159,7 +178,7 @@ final class InMemoryGateway implements TigerBeetleGateway
                 continue;
             }
 
-            [$this->accounts, $this->transfers, $this->pendingState] = $snapshot;
+            [$this->accounts, $this->transfers, $this->pendingState, $this->history] = $snapshot;
             for ($j = $start; $j <= $end; $j++) {
                 $results[$j] = $j === $failedAt ? $chain[$j] : new CreateOutcome($linkedFailed, $this->tick());
             }
@@ -414,6 +433,8 @@ final class InMemoryGateway implements TigerBeetleGateway
                 $t->userData32 ?: $pending->userData32,
             );
 
+            $this->recordHistory($pending, $timestamp);
+
             return new CreateOutcome(TR::CREATED, $timestamp);
         }
 
@@ -433,8 +454,21 @@ final class InMemoryGateway implements TigerBeetleGateway
             $t->ledger, $t->code, $flags, $t->timeout, $timestamp,
             $t->userData128, $t->userData64, $t->userData32,
         );
+        $this->recordHistory($this->transfers[$t->id], $timestamp);
 
         return new CreateOutcome(TR::CREATED, $timestamp);
+    }
+
+    private function recordHistory(TransferState $t, int $timestamp): void
+    {
+        foreach ([$t->debitAccountId, $t->creditAccountId] as $id) {
+            $a = $this->accounts[$id];
+            if (Flags::has($a['flags'], Flags::ACCOUNT_HISTORY)) {
+                $this->history[$id][] = new AccountBalanceState(
+                    $a['debitsPending'], $a['debitsPosted'], $a['creditsPending'], $a['creditsPosted'], $timestamp,
+                );
+            }
+        }
     }
 
     private function release(TransferState $pending): void

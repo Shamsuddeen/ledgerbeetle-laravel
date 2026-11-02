@@ -10,4 +10,6 @@ enum TransferKind: string
     case REVERSAL = 'reversal';
     case HOLD_POST = 'hold_post';
     case HOLD_VOID = 'hold_void';
+    // A leg of a currency conversion; reversed only as a whole conversion.
+    case CONVERSION = 'conversion';
 }

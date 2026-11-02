@@ -9,6 +9,7 @@ use LedgerBeetle\Laravel\Contracts\TigerBeetleGateway;
 use LedgerBeetle\Laravel\Enums\CreateAccountResult;
 use LedgerBeetle\Laravel\Enums\CreateTransferResult;
 use LedgerBeetle\Laravel\Exceptions\LedgerException;
+use LedgerBeetle\Laravel\Gateways\Data\AccountBalanceState;
 use LedgerBeetle\Laravel\Gateways\Data\AccountSpec;
 use LedgerBeetle\Laravel\Gateways\Data\AccountState;
 use LedgerBeetle\Laravel\Gateways\Data\CreateOutcome;
@@ -96,16 +97,40 @@ final class NativeGateway implements TigerBeetleGateway
     public function getAccountTransfers(string $accountId, int $limit = 100, bool $newestFirst = false): array
     {
         $limit = min($limit, self::MAX_BATCH);
-        $filter = U128::toBytes($accountId)
+        $reply = $this->client()->request(TbClient::OP_GET_ACCOUNT_TRANSFERS,
+            $this->accountFilter($accountId, $limit, $newestFirst, 0, 0), $limit * self::EVENT_SIZE);
+
+        return array_map($this->decodeTransfer(...), str_split($reply, self::EVENT_SIZE) ?: []);
+    }
+
+    public function getAccountBalances(
+        string $accountId,
+        int $limit = 100,
+        bool $newestFirst = false,
+        int $timestampMin = 0,
+        int $timestampMax = 0,
+    ): array {
+        $limit = min($limit, self::MAX_BATCH);
+        $reply = $this->client()->request(TbClient::OP_GET_ACCOUNT_BALANCES,
+            $this->accountFilter($accountId, $limit, $newestFirst, $timestampMin, $timestampMax), $limit * self::EVENT_SIZE);
+
+        return array_map(fn (string $s) => new AccountBalanceState(
+            $this->amount($s, 0), $this->amount($s, 16), $this->amount($s, 32), $this->amount($s, 48),
+            unpack('P', $s, 64)[1],
+        ), str_split($reply, self::EVENT_SIZE) ?: []);
+    }
+
+    /**
+     * tb_account_filter_t: transfers on either side of the account.
+     */
+    private function accountFilter(string $accountId, int $limit, bool $newestFirst, int $timestampMin, int $timestampMax): string
+    {
+        return U128::toBytes($accountId)
             .str_repeat("\0", 16)                     // user_data_128: any
             .pack('PVv', 0, 0, 0)                     // user_data_64/32, code: any
             .str_repeat("\0", 58)                     // reserved
-            .pack('PPVV', 0, 0, $limit,              // timestamp_min/max: any
+            .pack('PPVV', $timestampMin, $timestampMax, $limit,
                 self::FILTER_DEBITS | self::FILTER_CREDITS | ($newestFirst ? self::FILTER_REVERSED : 0));
-
-        $reply = $this->client()->request(TbClient::OP_GET_ACCOUNT_TRANSFERS, $filter, $limit * self::EVENT_SIZE);
-
-        return array_map($this->decodeTransfer(...), str_split($reply, self::EVENT_SIZE) ?: []);
     }
 
     private function client(): TbClient

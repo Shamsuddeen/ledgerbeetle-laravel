@@ -33,6 +33,9 @@ class LedgerAccount extends Model
 
     protected $guarded = ['id'];
 
+    /** Column defaults, so freshly created models carry them too. */
+    protected $attributes = ['flags' => 0, 'is_active' => true];
+
     protected function casts(): array
     {
         return [

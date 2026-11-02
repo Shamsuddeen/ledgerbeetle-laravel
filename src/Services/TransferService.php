@@ -9,10 +9,13 @@ use LedgerBeetle\Laravel\Contracts\TigerBeetleGateway;
 use LedgerBeetle\Laravel\Enums\CreateTransferResult;
 use LedgerBeetle\Laravel\Enums\TransferKind;
 use LedgerBeetle\Laravel\Enums\TransferStatus;
+use LedgerBeetle\Laravel\Exceptions\ClusterUnavailable;
 use LedgerBeetle\Laravel\Exceptions\InvalidLedgerOperation;
+use LedgerBeetle\Laravel\Exceptions\LedgerException;
 use LedgerBeetle\Laravel\Exceptions\TransferRejected;
 use LedgerBeetle\Laravel\Gateways\Data\CreateOutcome;
 use LedgerBeetle\Laravel\Gateways\Data\TransferSpec;
+use LedgerBeetle\Laravel\Gateways\NativeGateway;
 use LedgerBeetle\Laravel\Models\LedgerAccount;
 use LedgerBeetle\Laravel\Models\LedgerTransfer;
 use LedgerBeetle\Laravel\Support\Flags;
@@ -64,9 +67,10 @@ final class TransferService
      * multi-leg postings such as a payment plus its fee.
      *
      * @param  list<array{from: LedgerAccount|string, to: LedgerAccount|string, amount: Money|int, reference?: string, code?: int}>  $legs
+     * @param  array<string, mixed>  $attributes  extra columns stored on every leg
      * @return list<LedgerTransfer>
      */
-    public function transferMany(array $legs, string $idempotencyKey): array
+    public function transferMany(array $legs, string $idempotencyKey, TransferKind $kind = TransferKind::TRANSFER, array $attributes = []): array
     {
         if ($legs === []) {
             throw new InvalidLedgerOperation('A linked posting needs at least one leg.');
@@ -76,11 +80,11 @@ final class TransferService
 
         foreach (array_values($legs) as $i => $input) {
             $leg = $this->leg($input['from'], $input['to'], $input['amount'], $input['code'] ?? null);
-            $row = $this->writer->claim(LedgerTransfer::class, "{$idempotencyKey}#{$i}", $leg['fingerprint'] + ['legs' => count($legs)], $leg['attributes'] + [
-                'kind' => TransferKind::TRANSFER,
+            $row = $this->writer->claim(LedgerTransfer::class, "{$idempotencyKey}#{$i}", $leg['fingerprint'] + ['legs' => count($legs), 'kind' => $kind->value], $leg['attributes'] + [
+                'kind' => $kind,
                 'reference' => $input['reference'] ?? null,
                 'metadata' => ['linked_key' => $idempotencyKey, 'leg' => $i],
-            ]);
+            ] + $attributes);
 
             $rows[] = $row;
             $specs[] = $this->spec($row, $leg['from'], $leg['to'], $i < count($legs) - 1 ? Flags::TRANSFER_LINKED : 0);
@@ -124,6 +128,68 @@ final class TransferService
         }
 
         throw TransferRejected::for($cause);
+    }
+
+    /**
+     * Post many independent transfers in as few TigerBeetle requests as
+     * possible. Unlike transferMany() they are not linked: each succeeds or
+     * fails on its own, and the failures do not throw.
+     *
+     * Every item needs its own idempotency key, so a whole batch can be
+     * retried safely (e.g. by a queued job).
+     *
+     * @param  list<array{from: LedgerAccount|string, to: LedgerAccount|string, amount: Money|int, idempotency_key: string, reference?: string|null, code?: int|null}>  $items
+     * @return array<string, LedgerTransfer|LedgerException> keyed by idempotency key
+     *
+     * @throws ClusterUnavailable when TigerBeetle did not answer; retry the batch
+     */
+    public function transferBatch(array $items): array
+    {
+        $results = $pending = [];
+
+        foreach ($items as $item) {
+            $key = $item['idempotency_key'];
+
+            try {
+                $leg = $this->leg($item['from'], $item['to'], $item['amount'], $item['code'] ?? null);
+                $row = $this->writer->claim(LedgerTransfer::class, $key, $leg['fingerprint'], $leg['attributes'] + [
+                    'kind' => TransferKind::TRANSFER,
+                    'reference' => $item['reference'] ?? null,
+                ]);
+            } catch (LedgerException $e) {
+                $results[$key] = $e;
+
+                continue;
+            }
+
+            $results[$key] = match ($row->status) {
+                TransferStatus::POSTED => $row,
+                TransferStatus::FAILED => TransferRejected::fromRecorded($row->failure_reason),
+                TransferStatus::PENDING => null,
+            };
+
+            if ($row->status === TransferStatus::PENDING) {
+                $pending[$key] = [$row, $this->spec($row, $leg['from'], $leg['to'])];
+            }
+        }
+
+        foreach (array_chunk($pending, NativeGateway::MAX_BATCH, true) as $chunk) {
+            $outcomes = $this->gateway->createTransfers(array_column(array_values($chunk), 1));
+
+            foreach (array_keys($chunk) as $i => $key) {
+                [$row] = $chunk[$key];
+
+                if ($outcomes[$i]->ok()) {
+                    $row->update(self::posted($outcomes[$i]));
+                    $results[$key] = $row;
+                } else {
+                    $row->update(['status' => TransferStatus::FAILED, 'failure_reason' => $outcomes[$i]->result->name]);
+                    $results[$key] = TransferRejected::for($outcomes[$i]->result);
+                }
+            }
+        }
+
+        return $results;
     }
 
     /**

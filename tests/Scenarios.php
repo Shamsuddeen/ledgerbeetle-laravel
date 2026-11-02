@@ -10,6 +10,10 @@ use LedgerBeetle\Laravel\Enums\CreateTransferResult;
 use LedgerBeetle\Laravel\Enums\HoldStatus;
 use LedgerBeetle\Laravel\Enums\TransferKind;
 use LedgerBeetle\Laravel\Enums\TransferStatus;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Event;
+use LedgerBeetle\Laravel\Events\TransferBatchPosted;
+use LedgerBeetle\Laravel\Models\LedgerConversion;
 use LedgerBeetle\Laravel\Exceptions\IdempotencyConflict;
 use LedgerBeetle\Laravel\Exceptions\InsufficientFunds;
 use LedgerBeetle\Laravel\Exceptions\InvalidLedgerOperation;
@@ -209,10 +213,16 @@ function ledgerScenarios(): void
         $ghost = $alice->replicate()->fill(['code' => 'GHOST', 'tb_id' => \LedgerBeetle\Laravel\Support\Id::generate()]);
         $ghost->save();
 
+        // Crashed after the legs posted, before the conversion was marked.
+        Ledger::createAccount('BOB.EUR', 'Bob EUR wallet', AccountType::LIABILITY, 'EUR');
+        $stuck = Ledger::convert('ALICE', 'BOB.EUR', 10_00);
+        $stuck->update(['status' => TransferStatus::PENDING]);
+
         $this->artisan('ledger:reconcile', ['--age' => 0])->assertFailed();
         $this->artisan('ledger:reconcile', ['--age' => 0, '--fix' => true])->assertSuccessful();
 
         expect($orphan->refresh()->status)->toBe(TransferStatus::FAILED)
+            ->and($stuck->refresh()->status)->toBe(TransferStatus::POSTED)
             ->and(Ledger::balance('GHOST')->posted)->toBe(0);
 
         $this->artisan('ledger:reconcile', ['--age' => 0, '--deep' => true])
@@ -227,5 +237,172 @@ function ledgerScenarios(): void
         $operating = Ledger::account('ASSET.CASH.OPERATING.NGN');
         expect($operating->parent->code)->toBe('ASSET.CASH.NGN')
             ->and($operating->ledger)->toBe(566);
+    });
+
+    it('converts across ledgers atomically, with a fee', function () {
+        Ledger::createAccount('BOB.EUR', 'Bob EUR wallet', AccountType::LIABILITY, 'EUR');
+
+        $conversion = Ledger::convert('ALICE', 'BOB.EUR', Money::parse('50.00', 'USD'),
+            idempotencyKey: 'fx-1', fee: 1_00, feeAccount: 'FEES');
+
+        expect($conversion->status)->toBe(TransferStatus::POSTED)
+            ->and($conversion->rate)->toBe('0.92')
+            ->and($conversion->target_amount)->toBe(46_00)
+            ->and($conversion->legs)->toHaveCount(3)
+            ->and(Ledger::balance('ALICE')->available)->toBe(49_00)
+            ->and(Ledger::balance('BOB.EUR')->posted)->toBe(46_00)
+            ->and(Ledger::balance('FEES')->posted)->toBe(1_00)
+            ->and(Ledger::balance('FX.POSITION.USD')->posted)->toBe(50_00)
+            ->and(Ledger::balance('FX.POSITION.EUR')->posted)->toBe(-46_00)
+            // Replays return the original; a different explicit rate is a different request.
+            ->and(Ledger::convert('ALICE', 'BOB.EUR', 50_00, idempotencyKey: 'fx-1', fee: 1_00, feeAccount: 'FEES')->is($conversion))->toBeTrue()
+            ->and(fn () => Ledger::convert('ALICE', 'BOB.EUR', 50_00, '0.5', 'fx-1', 1_00, 'FEES'))->toThrow(IdempotencyConflict::class)
+            // Legs only move as a whole conversion.
+            ->and(fn () => Ledger::reverse($conversion->legs[1]))->toThrow(InvalidLedgerOperation::class);
+    });
+
+    it('fails a conversion as a whole when the payer is short', function () {
+        Ledger::createAccount('BOB.EUR', 'Bob EUR wallet', AccountType::LIABILITY, 'EUR');
+
+        expect(fn () => Ledger::convert('ALICE', 'BOB.EUR', 200_00, idempotencyKey: 'fx-big'))->toThrow(InsufficientFunds::class);
+
+        $conversion = LedgerConversion::query()->where('idempotency_key', 'fx-big')->sole();
+        expect($conversion->status)->toBe(TransferStatus::FAILED)
+            ->and($conversion->failure_reason)->toBe('EXCEEDS_CREDITS')
+            ->and(Ledger::balance('BOB.EUR')->posted)->toBe(0)
+            ->and(Ledger::balance('FX.POSITION.EUR')->posted)->toBe(0)
+            ->and(fn () => Ledger::convert('ALICE', 'SHOP', 1_00))->toThrow(InvalidLedgerOperation::class);
+    });
+
+    it('reverses a conversion at its original rate, once', function () {
+        Ledger::createAccount('BOB.EUR', 'Bob EUR wallet', AccountType::LIABILITY, 'EUR');
+        $conversion = Ledger::convert('ALICE', 'BOB.EUR', 50_00, fee: 1_00, feeAccount: 'FEES');
+
+        $reversal = Ledger::reverseConversion($conversion);
+
+        expect($reversal->reverses_id)->toBe($conversion->id)
+            ->and($reversal->source_currency)->toBe('EUR')
+            ->and(Ledger::balance('ALICE')->available)->toBe(100_00)
+            ->and(Ledger::balance('BOB.EUR')->posted)->toBe(0)
+            ->and(Ledger::balance('FEES')->posted)->toBe(0)
+            ->and(Ledger::balance('FX.POSITION.USD')->posted)->toBe(0)
+            ->and(Ledger::reverseConversion($conversion)->is($reversal))->toBeTrue()
+            ->and(fn () => Ledger::reverseConversion($conversion, 'another-key'))->toThrow(InvalidLedgerOperation::class)
+            ->and(fn () => Ledger::reverseConversion($reversal))->toThrow(InvalidLedgerOperation::class);
+    });
+
+    it('rounds converted amounts down across currency scales', function () {
+        $fx = app(\LedgerBeetle\Laravel\Services\ConversionService::class);
+
+        expect($fx->targetAmount(1_01, '150.5', 'USD', 'JPY'))->toBe(152)      // 152.005 yen
+            ->and($fx->targetAmount(152, '0.0066445', 'JPY', 'USD'))->toBe(1_00) // $1.00996
+            ->and(fn () => $fx->targetAmount(1, '0.001', 'USD', 'EUR'))->toThrow(InvalidLedgerOperation::class)
+            ->and(fn () => $fx->targetAmount(1_00, '-1', 'USD', 'EUR'))->toThrow(InvalidLedgerOperation::class);
+    });
+
+    it('answers balances as of a past moment', function () {
+        $this->passSeconds(1);
+        $afterFunding = Carbon::now();
+        $this->passSeconds(1);
+        Ledger::transfer('ALICE', 'SHOP', 30_00);
+
+        $history = Ledger::balanceHistory('ALICE');
+
+        expect(Ledger::balanceAt('ALICE', $afterFunding)->posted)->toBe(100_00)
+            ->and(Ledger::balanceAt('ALICE', Carbon::now()->subYear())->posted)->toBe(0)
+            ->and(Ledger::balance('ALICE')->posted)->toBe(70_00)
+            ->and(array_map(fn ($s) => $s->balance->posted, $history))->toBe([70_00, 100_00])
+            ->and($history[1]->at->lessThan($afterFunding))->toBeTrue()
+            ->and(Ledger::balanceHistory('ALICE', from: $afterFunding))->toHaveCount(1);
+
+        Ledger::createAccount('NOHIST', 'No history', AccountType::LIABILITY, history: false);
+        expect(fn () => Ledger::balanceAt('NOHIST', Carbon::now()))->toThrow(InvalidLedgerOperation::class);
+    });
+
+    it('posts independent transfers in one batch', function () {
+        Ledger::transfer('ALICE', 'SHOP', 5_00, 'earlier');
+        $items = [
+            ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => 10_00, 'idempotency_key' => 'b-1'],
+            ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => 1_000_00, 'idempotency_key' => 'b-2'],
+            ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => 5_00, 'idempotency_key' => 'earlier'],
+            ['from' => 'NOPE', 'to' => 'SHOP', 'amount' => 1_00, 'idempotency_key' => 'b-3'],
+        ];
+
+        $results = Ledger::transferBatch($items);
+
+        expect($results['b-1'])->toBeInstanceOf(LedgerTransfer::class)
+            ->and($results['b-2'])->toBeInstanceOf(InsufficientFunds::class)
+            ->and($results['earlier']->status)->toBe(TransferStatus::POSTED)
+            ->and($results['b-3'])->toBeInstanceOf(\LedgerBeetle\Laravel\Exceptions\AccountNotFound::class)
+            ->and(Ledger::balance('SHOP')->posted)->toBe(15_00);
+
+        // The whole batch can be replayed safely.
+        $again = Ledger::transferBatch($items);
+        expect($again['b-1']->is($results['b-1']))->toBeTrue()
+            ->and($again['b-2'])->toBeInstanceOf(InsufficientFunds::class)
+            ->and(Ledger::balance('SHOP')->posted)->toBe(15_00);
+    });
+
+    it('posts queued batches and reports the outcome', function () {
+        Event::fake([TransferBatchPosted::class]);
+
+        $batchId = Ledger::queueBatch([
+            ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => 2_00, 'idempotency_key' => 'q-1'],
+            ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => 999_00, 'idempotency_key' => 'q-2'],
+        ]);
+
+        Event::assertDispatched(TransferBatchPosted::class, fn (TransferBatchPosted $e) => $e->batchId === $batchId
+            && $e->posted === ['q-1'] && $e->failed === ['q-2' => 'exceeds_credits']);
+        expect(Ledger::balance('SHOP')->posted)->toBe(2_00);
+    });
+
+    it('serves the HTTP API', function () {
+        $this->postJson('/ledger/transfers', ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => '12.50'])
+            ->assertUnprocessable()->assertJsonValidationErrors('Idempotency-Key');
+
+        $headers = ['Idempotency-Key' => 'api-1'];
+        $created = $this->postJson('/ledger/transfers', ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => '12.50'], $headers)
+            ->assertCreated()
+            ->assertJsonPath('data.status', 'posted')
+            ->assertJsonPath('data.amount.minor', 12_50)
+            ->assertJsonPath('data.amount.decimal', '12.50');
+
+        $this->postJson('/ledger/transfers', ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => '12.50'], $headers)
+            ->assertOk()->assertJsonPath('data.id', $created->json('data.id'));
+        $this->postJson('/ledger/transfers', ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => '13.00'], $headers)
+            ->assertConflict()->assertJsonPath('error.code', 'idempotency_conflict');
+        $this->postJson('/ledger/transfers', ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => '500'], ['Idempotency-Key' => 'api-2'])
+            ->assertUnprocessable()->assertJsonPath('error.code', 'insufficient_funds');
+        $this->postJson('/ledger/transfers', ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => '1.005'], ['Idempotency-Key' => 'api-3'])
+            ->assertJsonValidationErrors('amount');
+        $this->getJson('/ledger/accounts/NOPE')->assertNotFound()->assertJsonPath('error.code', 'account_not_found');
+
+        $this->getJson('/ledger/accounts/ALICE')
+            ->assertOk()->assertJsonPath('data.code', 'ALICE')->assertJsonPath('balance.available', 87_50);
+        // Funding, api-1, and the rejected api-2 (failed attempts are listed too).
+        $this->getJson('/ledger/accounts/ALICE/transfers')->assertOk()->assertJsonCount(3, 'data')
+            ->assertJsonPath('data.0.status', 'failed');
+        $this->getJson('/ledger/accounts/ALICE/history')->assertOk()->assertJsonPath('data.0.posted', 87_50);
+
+        $this->postJson("/ledger/transfers/{$created->json('data.id')}/reversals", ['amount' => '2.50'], ['Idempotency-Key' => 'api-r'])
+            ->assertCreated()->assertJsonPath('data.kind', 'reversal');
+
+        $hold = $this->postJson('/ledger/holds', ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => '20'], ['Idempotency-Key' => 'api-h'])
+            ->assertCreated()->assertJsonPath('data.status', 'active');
+        $this->postJson("/ledger/holds/{$hold->json('data.id')}/capture", ['amount' => '5'])
+            ->assertCreated()->assertJsonPath('data.kind', 'hold_post');
+        $this->getJson("/ledger/holds/{$hold->json('data.id')}")->assertJsonPath('data.status', 'posted');
+
+        $this->postJson('/ledger/accounts', ['code' => 'BOB.EUR', 'name' => 'Bob', 'type' => 'liability', 'currency' => 'EUR'])
+            ->assertCreated();
+        $this->postJson('/ledger/conversions', ['from' => 'ALICE', 'to' => 'BOB.EUR', 'amount' => '10'], ['Idempotency-Key' => 'api-fx'])
+            ->assertCreated()->assertJsonPath('data.target.decimal', '9.20');
+
+        $this->postJson('/ledger/transfer-batches', ['items' => [
+            ['from' => 'ALICE', 'to' => 'SHOP', 'amount' => '1', 'idempotency_key' => 'api-b1'],
+        ]])->assertAccepted()->assertJsonPath('data.idempotency_keys', ['api-b1']);
+
+        // 87.50 + 2.50 reversed - 5 captured - 10 converted - 1 batched
+        expect(Ledger::balance('ALICE')->available)->toBe(74_00);
     });
 }

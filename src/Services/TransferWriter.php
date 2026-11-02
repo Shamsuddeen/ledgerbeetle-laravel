@@ -12,6 +12,7 @@ use LedgerBeetle\Laravel\Exceptions\IdempotencyConflict;
 use LedgerBeetle\Laravel\Exceptions\TransferRejected;
 use LedgerBeetle\Laravel\Gateways\Data\CreateOutcome;
 use LedgerBeetle\Laravel\Gateways\Data\TransferSpec;
+use LedgerBeetle\Laravel\Models\LedgerConversion;
 use LedgerBeetle\Laravel\Models\LedgerHold;
 use LedgerBeetle\Laravel\Models\LedgerTransfer;
 use LedgerBeetle\Laravel\Support\Id;
@@ -33,14 +34,15 @@ final class TransferWriter
     ) {}
 
     /**
-     * @template T of LedgerTransfer|LedgerHold
+     * @template T of LedgerTransfer|LedgerHold|LedgerConversion
      *
      * @param  class-string<T>  $model
      * @param  array<string, mixed>  $fingerprint  the parameters a retry must repeat exactly
      * @param  array<string, mixed>  $attributes
+     * @param  bool  $withTbId  false for records that are not TB objects themselves
      * @return T
      */
-    public function claim(string $model, string $key, array $fingerprint, array $attributes): Model
+    public function claim(string $model, string $key, array $fingerprint, array $attributes, bool $withTbId = true): Model
     {
         $hash = hash('sha256', json_encode($fingerprint, JSON_THROW_ON_ERROR));
 
@@ -51,9 +53,8 @@ final class TransferWriter
                 return $model::query()->create($attributes + [
                     'idempotency_key' => $key,
                     'fingerprint' => $hash,
-                    'tb_id' => Id::generate(),
                     'status' => 'pending',
-                ]);
+                ] + ($withTbId ? ['tb_id' => Id::generate()] : []));
             } catch (UniqueConstraintViolationException) {
                 // Lost a race with a concurrent request using the same key.
                 $row = $model::query()->where('idempotency_key', $key)->firstOrFail();

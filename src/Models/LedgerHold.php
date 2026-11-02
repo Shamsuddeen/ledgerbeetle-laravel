@@ -37,6 +37,9 @@ class LedgerHold extends Model
 
     protected $guarded = ['id'];
 
+    /** Column defaults, so freshly created models carry them too. */
+    protected $attributes = ['timeout_seconds' => 0];
+
     protected function casts(): array
     {
         return [

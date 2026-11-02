@@ -28,6 +28,7 @@ use LedgerBeetle\Laravel\Enums\TransferStatus;
  * @property int $tb_code
  * @property int|null $hold_id
  * @property int|null $reverses_id
+ * @property int|null $conversion_id
  * @property int $reversed_amount
  * @property string|null $reference
  * @property string|null $failure_reason
@@ -39,6 +40,9 @@ class LedgerTransfer extends Model
     protected $table = 'ledger_transfers';
 
     protected $guarded = ['id'];
+
+    /** Column defaults, so freshly created models carry them too. */
+    protected $attributes = ['reversed_amount' => 0];
 
     protected function casts(): array
     {
@@ -72,6 +76,11 @@ class LedgerTransfer extends Model
     public function reverses(): BelongsTo
     {
         return $this->belongsTo(self::class, 'reverses_id');
+    }
+
+    public function conversion(): BelongsTo
+    {
+        return $this->belongsTo(LedgerConversion::class, 'conversion_id');
     }
 
     public function reversals(): HasMany

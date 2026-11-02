@@ -21,6 +21,7 @@ final class TbClient
     public const OP_LOOKUP_ACCOUNTS = 140;
     public const OP_LOOKUP_TRANSFERS = 141;
     public const OP_GET_ACCOUNT_TRANSFERS = 142;
+    public const OP_GET_ACCOUNT_BALANCES = 143;
     public const OP_CREATE_ACCOUNTS = 146;
     public const OP_CREATE_TRANSFERS = 147;
 

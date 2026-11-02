@@ -1,5 +1,5 @@
 {
-    "name": "ledgerbeetle/laravel",
+    "name": "omacy/ledgerbeetle",
     "description": "Double-entry ledger for Laravel, backed by TigerBeetle.",
     "type": "library",
     "license": "MIT",

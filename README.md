@@ -20,7 +20,7 @@ Requires PHP 8.2+, `ext-ffi`, `ext-bcmath` (`ext-gmp` is faster if you have it),
 ## Install
 
 ```bash
-composer require ledgerbeetle/laravel
+composer require omacy/ledgerbeetle
 php artisan vendor:publish --tag=ledger-config
 php artisan migrate
 ```
@@ -32,7 +32,7 @@ PHP has no official TigerBeetle client. This package talks to TigerBeetle's offi
 Composer wipes `vendor/` on every update, so build the libraries into a folder your app owns and point the package at it:
 
 ```bash
-LEDGERBEETLE_LIB_DIR="$PWD/storage/ledgerbeetle" vendor/ledgerbeetle/laravel/bin/build-native.sh 0.17.9
+LEDGERBEETLE_LIB_DIR="$PWD/storage/ledgerbeetle" vendor/omacy/ledgerbeetle/bin/build-native.sh 0.17.9
 ```
 
 ```dotenv

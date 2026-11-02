@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use LedgerBeetle\Laravel\Enums\TransferKind;
 use LedgerBeetle\Laravel\Enums\TransferStatus;
+use LedgerBeetle\Laravel\Models\Concerns\UsesLedgerConnection;
 
 /**
  * Local record of a transfer sent to TigerBeetle.
@@ -37,6 +38,8 @@ use LedgerBeetle\Laravel\Enums\TransferStatus;
  */
 class LedgerTransfer extends Model
 {
+    use UsesLedgerConnection;
+
     protected $table = 'ledger_transfers';
 
     protected $guarded = ['id'];

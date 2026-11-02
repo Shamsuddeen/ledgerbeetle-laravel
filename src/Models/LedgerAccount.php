@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use LedgerBeetle\Laravel\Enums\AccountType;
+use LedgerBeetle\Laravel\Models\Concerns\UsesLedgerConnection;
 
 /**
  * Descriptive metadata for a TigerBeetle account. Balances live in TB only;
@@ -29,6 +30,8 @@ use LedgerBeetle\Laravel\Enums\AccountType;
  */
 class LedgerAccount extends Model
 {
+    use UsesLedgerConnection;
+
     protected $table = 'ledger_accounts';
 
     protected $guarded = ['id'];

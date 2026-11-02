@@ -6,6 +6,11 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
+    public function getConnection(): ?string
+    {
+        return config('ledger.database_connection') ?? $this->connection;
+    }
+
     public function up(): void
     {
         Schema::create('ledger_accounts', function (Blueprint $table) {

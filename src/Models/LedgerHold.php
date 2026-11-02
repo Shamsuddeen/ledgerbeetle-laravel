@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use LedgerBeetle\Laravel\Enums\HoldStatus;
+use LedgerBeetle\Laravel\Models\Concerns\UsesLedgerConnection;
 
 /**
  * Funds reserved by a TigerBeetle pending transfer.
@@ -33,6 +34,8 @@ use LedgerBeetle\Laravel\Enums\HoldStatus;
  */
 class LedgerHold extends Model
 {
+    use UsesLedgerConnection;
+
     protected $table = 'ledger_holds';
 
     protected $guarded = ['id'];

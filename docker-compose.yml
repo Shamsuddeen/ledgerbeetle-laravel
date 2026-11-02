@@ -1,0 +1,20 @@
+# Single-replica TigerBeetle for development and the integration tests.
+# Not a production topology: run 6 replicas across failure domains there.
+services:
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.9
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        [ -f /data/0_0.tigerbeetle ] || /tigerbeetle format --cluster=0 --replica=0 --replica-count=1 --development /data/0_0.tigerbeetle
+        exec /tigerbeetle start --addresses=0.0.0.0:3000 --development /data/0_0.tigerbeetle
+    ports:
+      - "3000:3000"
+    volumes:
+      - tigerbeetle-data:/data
+    # TigerBeetle uses io_uring, which Docker's default seccomp profile blocks.
+    security_opt:
+      - seccomp=unconfined
+
+volumes:
+  tigerbeetle-data:

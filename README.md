@@ -33,13 +33,18 @@ vendor/ledgerbeetle/laravel/bin/build-native.sh 0.17.9
 
 The script:
 
-1. Fetches TigerBeetle's prebuilt static `libtb_client` and `tb_client.h` for your platform from the [tigerbeetle-go](https://github.com/tigerbeetle/tigerbeetle-go) release.
-2. Checks both files against the git hashes GitHub reports for that tag.
-3. Builds `resources/lib/<platform>/libledgerbeetle_tb.{so,dylib}`.
+1. Downloads TigerBeetle's official [`tigerbeetle` wheel](https://pypi.org/project/tigerbeetle/) from PyPI, which bundles prebuilt `libtb_client` shared libraries for every platform.
+2. Checks the wheel against the SHA-256 PyPI publishes.
+3. Writes `resources/lib/<platform>/` with `libtb_client.{so,dylib}` and the shim `libledgerbeetle_tb.{so,dylib}`, which finds the client library next to itself.
 
-It needs a C compiler. It supports Linux and macOS on x86_64 and arm64. Build it for each platform you deploy to, for example in your Docker image.
+It needs `curl`, `unzip` and a C compiler. It supports macOS and Linux (glibc or musl) on x86_64 and arm64. Build it for each platform you deploy to, for example in your Docker image.
 
-FFI must be allowed to load the library. The CLI allows it by default. For PHP-FPM, set `ffi.enable=true` in php.ini.
+The C header the shim compiles against, [native/tb_client.h](native/tb_client.h), is pinned to TigerBeetle 0.17.9. Upgrade it together with the version you pass to the script; [native/README.md](native/README.md) says where it comes from.
+
+Runtime requirements:
+
+- **FFI must be allowed to load the library.** The CLI allows it by default. For PHP-FPM, set `ffi.enable=true` in php.ini.
+- **The TigerBeetle client uses `io_uring` on Linux.** Docker's default seccomp profile blocks it, so a PHP container that talks to TigerBeetle needs `security_opt: [seccomp=unconfined]` or a profile that allows `io_uring_setup`, `io_uring_enter` and `io_uring_register`. Without it the client aborts the PHP process when it starts.
 
 ### Configure
 
@@ -217,6 +222,8 @@ TB_ADDRESSES=127.0.0.1:3000 composer test:integration   # same scenarios against
 ```
 
 The feature and integration suites run the same scenarios ([tests/Scenarios.php](tests/Scenarios.php)), so the fake is checked against real TigerBeetle.
+
+CI ([.github/workflows/tests.yml](.github/workflows/tests.yml)) runs the feature suite on PHP 8.2–8.4. It then builds the shim on Linux x86_64, starts TigerBeetle with `docker compose`, and runs the integration suite against it.
 
 ## Not in this version
 

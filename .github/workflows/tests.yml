@@ -1,0 +1,90 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  TB_VERSION: 0.17.9
+
+jobs:
+  feature:
+    name: Feature (PHP ${{ matrix.php }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Composer picks the newest Laravel each PHP version supports (13 needs 8.3+).
+        php: ['8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: ffi, bcmath, gmp, pdo_sqlite
+          coverage: none
+
+      - name: Install dependencies
+        run: composer update --no-interaction --no-progress --prefer-dist
+
+      - name: Unit and feature tests (in-memory gateway)
+        run: vendor/bin/pest --exclude-group=integration
+
+  integration:
+    name: Integration (real TigerBeetle, Linux x86_64)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: ffi, bcmath, gmp, pdo_sqlite
+          ini-values: ffi.enable=true
+          coverage: none
+
+      - name: Start TigerBeetle
+        run: docker compose up -d
+
+      - name: Install dependencies
+        run: composer update --no-interaction --no-progress --prefer-dist
+
+      - name: Cache native shim
+        id: native-cache
+        uses: actions/cache@v4
+        with:
+          path: resources/lib
+          key: native-${{ runner.os }}-${{ runner.arch }}-tb${{ env.TB_VERSION }}-${{ hashFiles('native/**', 'bin/build-native.sh') }}
+
+      - name: Build native shim
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: bin/build-native.sh "$TB_VERSION"
+
+      - name: Wait for TigerBeetle
+        run: |
+          for i in $(seq 1 60); do
+            if docker compose logs tigerbeetle 2>&1 | grep -q 'listening on'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker compose logs tigerbeetle
+          exit 1
+
+      - name: Integration tests (real cluster)
+        env:
+          TB_ADDRESSES: 127.0.0.1:3000
+        run: vendor/bin/pest --group=integration
+
+      - name: TigerBeetle logs
+        if: failure()
+        run: docker compose logs tigerbeetle

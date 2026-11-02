@@ -23,18 +23,24 @@ use LedgerBeetle\Laravel\Models\LedgerTransfer;
 use LedgerBeetle\Laravel\Services\TransferWriter;
 use LedgerBeetle\Laravel\Support\Money;
 
+/**
+ * Accounts every scenario starts from. Each test file registers this with
+ * its own beforeEach(): Pest 3 attaches hooks to the file that calls
+ * beforeEach(), so registering it here would silently skip it.
+ */
+function ledgerFixtures(): void
+{
+    // Bank cash (asset, unguarded) funds customer wallets (liabilities,
+    // guarded against overdraft by default).
+    Ledger::createAccount('BANK', 'Bank', AccountType::ASSET);
+    Ledger::createAccount('ALICE', 'Alice wallet', AccountType::LIABILITY);
+    Ledger::createAccount('SHOP', 'Shop wallet', AccountType::LIABILITY);
+    Ledger::createAccount('FEES', 'Fee revenue', AccountType::REVENUE);
+    Ledger::transfer('BANK', 'ALICE', 100_00, 'fund-alice');
+}
+
 function ledgerScenarios(): void
 {
-    beforeEach(function () {
-        // Bank cash (asset, unguarded) funds customer wallets (liabilities,
-        // guarded against overdraft by default).
-        Ledger::createAccount('BANK', 'Bank', AccountType::ASSET);
-        Ledger::createAccount('ALICE', 'Alice wallet', AccountType::LIABILITY);
-        Ledger::createAccount('SHOP', 'Shop wallet', AccountType::LIABILITY);
-        Ledger::createAccount('FEES', 'Fee revenue', AccountType::REVENUE);
-        Ledger::transfer('BANK', 'ALICE', 100_00, 'fund-alice');
-    });
-
     it('creates accounts idempotently by code', function () {
         $again = Ledger::createAccount('ALICE', 'Alice wallet', AccountType::LIABILITY);
 

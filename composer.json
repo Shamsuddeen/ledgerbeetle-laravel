@@ -3,6 +3,17 @@
     "description": "Double-entry ledger for Laravel, backed by TigerBeetle.",
     "type": "library",
     "license": "MIT",
+    "homepage": "https://github.com/Shamsuddeen/ledgerbeetle-laravel",
+    "authors": [
+        {
+            "name": "Shamsuddeen",
+            "homepage": "https://github.com/Shamsuddeen"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/Shamsuddeen/ledgerbeetle-laravel/issues",
+        "source": "https://github.com/Shamsuddeen/ledgerbeetle-laravel"
+    },
     "keywords": [
         "laravel",
         "ledger",

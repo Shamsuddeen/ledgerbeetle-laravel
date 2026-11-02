@@ -8,7 +8,11 @@
 #
 # Usage: bin/build-native.sh [tb-version]      (default: 0.17.9)
 #        The version must match native/tb_client.h.
-# Env:   TB_WHEEL=path   use an already-downloaded wheel (still verified)
+# Env:   LEDGERBEETLE_LIB_DIR=dir  write the libraries to dir instead of the
+#                        package's resources/lib/<platform>/. Use this in apps:
+#                        Composer wipes vendor/ on update. Then point
+#                        TB_CLIENT_LIB at dir/libledgerbeetle_tb.(so|dylib).
+#        TB_WHEEL=path   use an already-downloaded wheel (still verified)
 #        CC=cc           C compiler (default: cc)
 # Needs: curl, unzip, php, a C compiler.
 set -euo pipefail
@@ -57,7 +61,7 @@ echo "Wheel verified (sha256 ${WHEEL_SHA})"
 TB_LIB="libtb_client.$EXT"
 unzip -q -j "$WHEEL" "tigerbeetle/lib/${TB_DIR}/${TB_LIB}" -d "$WORK"
 
-OUT_DIR="$ROOT/resources/lib/$PLATFORM"
+OUT_DIR="${LEDGERBEETLE_LIB_DIR:-$ROOT/resources/lib/$PLATFORM}"
 mkdir -p "$OUT_DIR"
 cp "$WORK/$TB_LIB" "$OUT_DIR/$TB_LIB"
 

@@ -13,6 +13,8 @@ A double-entry ledger for Laravel with [TigerBeetle](https://tigerbeetle.com) as
 - **Batch posting** sends independent transfers in one round trip, either inline or as a queued job.
 - **HTTP API** (off by default) with required idempotency keys and JSON errors.
 
+[![Tests](https://github.com/Shamsuddeen/ledgerbeetle-laravel/actions/workflows/tests.yml/badge.svg)](https://github.com/Shamsuddeen/ledgerbeetle-laravel/actions/workflows/tests.yml)
+
 Requires PHP 8.2+, `ext-ffi`, `ext-bcmath` (`ext-gmp` is faster if you have it), Laravel 11–13, and TigerBeetle 0.17.x.
 
 ## Install
@@ -27,15 +29,23 @@ php artisan migrate
 
 PHP has no official TigerBeetle client. This package talks to TigerBeetle's official C client (`tb_client`) through PHP FFI, plus a small C shim ([native/ledgerbeetle_tb.c](native/ledgerbeetle_tb.c)) that makes its callback-based API synchronous.
 
+Composer wipes `vendor/` on every update, so build the libraries into a folder your app owns and point the package at it:
+
 ```bash
-vendor/ledgerbeetle/laravel/bin/build-native.sh 0.17.9
+LEDGERBEETLE_LIB_DIR="$PWD/storage/ledgerbeetle" vendor/ledgerbeetle/laravel/bin/build-native.sh 0.17.9
 ```
+
+```dotenv
+TB_CLIENT_LIB=/path/to/app/storage/ledgerbeetle/libledgerbeetle_tb.so   # .dylib on macOS
+```
+
+Without `LEDGERBEETLE_LIB_DIR` the script writes to the package's own `resources/lib/<platform>/`, where it's found automatically but lost on the next `composer update`.
 
 The script:
 
 1. Downloads TigerBeetle's official [`tigerbeetle` wheel](https://pypi.org/project/tigerbeetle/) from PyPI, which bundles prebuilt `libtb_client` shared libraries for every platform.
 2. Checks the wheel against the SHA-256 PyPI publishes.
-3. Writes `resources/lib/<platform>/` with `libtb_client.{so,dylib}` and the shim `libledgerbeetle_tb.{so,dylib}`, which finds the client library next to itself.
+3. Writes the output folder with `libtb_client.{so,dylib}` and the shim `libledgerbeetle_tb.{so,dylib}`, which finds the client library next to itself.
 
 It needs `curl`, `unzip` and a C compiler. It supports macOS and Linux (glibc or musl) on x86_64 and arm64. Build it for each platform you deploy to, for example in your Docker image.
 
@@ -231,3 +241,7 @@ CI ([.github/workflows/tests.yml](.github/workflows/tests.yml)) runs the feature
 - **Live exchange-rate providers.** Implement `ExchangeRates` to add one.
 - **Closing accounts.** TigerBeetle's `closing_*` transfers aren't wrapped.
 - **Change-event streaming** (`get_change_events`).
+
+## License
+
+MIT. See [LICENSE](LICENSE). The bundled [native/tb_client.h](native/tb_client.h) and the downloaded `libtb_client` are TigerBeetle's, under Apache-2.0.
